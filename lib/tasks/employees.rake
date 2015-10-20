@@ -14,7 +14,6 @@ namespace :employees do
     logger.info "Employee import task finished at #{end_time} (#{duration} seconds running time)."
     logger.info "Employees imported: #{import_statistics[:created]}"
     logger.info "Employees skipped: #{import_statistics[:skipped]}"
-    logger.info "Import Errors: #{import_statistics[:errors]}"
 
     logger.close
   end
@@ -35,9 +34,8 @@ namespace :employees do
       duration = (start_time - end_time) / 1.seconds
 
       puts "Employee import dry run task finished at #{end_time} (#{duration} seconds running time)."
-      puts "Employees imported: #{import_statistics[:created]}".green
-      puts "Employees skipped: #{import_statistics[:skipped]}".yellow
-      puts "Import Errors: #{import_statistics[:errors]}".red
+      puts "Employees imported: #{import_statistics[:created]} (dry run)".green
+      puts "Employees skipped: #{import_statistics[:skipped]} (dry run)".yellow
     end
   end
 end
