@@ -1,83 +1,95 @@
 require "rails_helper"
 
 describe MessageSender do
-  it "creates a sent scheduled message if sent successfully" do
-    Timecop.freeze(Time.parse("10:00:00 UTC"))
+  let(:base_dt) { Time.parse("10:00:00 UTC") }
+  before { Timecop.freeze(base_dt) }
+  let!(:scheduled_message) { create(:scheduled_message) }
+  let!(:employee) { create(:employee) }
+  let!(:client_double) { Slack::Web::Client.new }
+  let!(:slack_channel_id) { 'fake_slack_channel_id' }
+  let!(:slack_channel_finder_double) { double(run: slack_channel_id) }
 
-    scheduled_message = create(:scheduled_message)
-    employee = create(:employee)
-    client_double = Slack::Web::Client.new
-    slack_channel_id = "fake_slack_channel_id"
-    slack_channel_finder_double = double(run: slack_channel_id)
+  context 'if sent successfully' do
+    before do
+      allow(Slack::Web::Client).to receive(:new).and_return(client_double)
+      allow(SlackChannelIdFinder).
+        to receive(:new).with(employee.slack_username, client_double).
+        and_return(slack_channel_finder_double)
+      allow(SentScheduledMessage).to receive(:create)
+    end
 
-    allow(Slack::Web::Client).to receive(:new).and_return(client_double)
-    allow(SlackChannelIdFinder).
-      to receive(:new).with(employee.slack_username, client_double).
-      and_return(slack_channel_finder_double)
-    allow(SentScheduledMessage).to receive(:create)
+    it "creates a sent scheduled message" do
+      MessageSender.new(employee, scheduled_message).run
 
-    MessageSender.new(employee, scheduled_message).run
+      expect(SentScheduledMessage).to have_received(:create).with(
+        employee: employee,
+        scheduled_message: scheduled_message,
+        sent_on: Date.today,
+        sent_at: Time.parse("10:00:00 UTC"),
+        error_message: "",
+        message_body: scheduled_message.body,
+      )
 
-    expect(SentScheduledMessage).to have_received(:create).with(
-      employee: employee,
-      scheduled_message: scheduled_message,
-      sent_on: Date.today,
-      sent_at: Time.parse("10:00:00 UTC"),
-      error_message: "",
-      message_body: scheduled_message.body,
-    )
+      Timecop.return
+    end
 
-    Timecop.return
+    it 'presists the channel id to the employee\'s slack_channel_id field' do
+      MessageSender.new(employee, scheduled_message).run
+      expect(employee.reload.slack_channel_id).to eq('fake_slack_channel_id')
+
+      Timecop.return
+    end
   end
 
-  it "creates a sent scheduled message with error message if error" do
-    Timecop.freeze(Time.parse("10:00:00 UTC"))
+  context 'if error from SlackApi' do
+    before do
+      allow(Slack::Web::Client).to receive(:new).and_return(client_double)
+      allow(SlackChannelIdFinder).
+        to receive(:new).with(employee.slack_username, client_double).
+        and_return(slack_channel_finder_double)
+      allow(SentScheduledMessage).to receive(:create)
+    end
 
-    scheduled_message = create(:scheduled_message)
-    employee = create(:employee)
-    client_double = Slack::Web::Client.new
-    slack_channel_id = "fake_slack_channel_id"
-    slack_channel_finder_double = double(run: slack_channel_id)
-    FakeSlackApi.failure = true
+    it "creates a sent scheduled message with error message if error" do
+      FakeSlackApi.failure = true
+      MessageSender.new(employee, scheduled_message).run
 
-    allow(Slack::Web::Client).to receive(:new).and_return(client_double)
-    allow(SlackChannelIdFinder).
-      to receive(:new).with(employee.slack_username, client_double).
-      and_return(slack_channel_finder_double)
-    allow(SentScheduledMessage).to receive(:create)
+      expect(SentScheduledMessage).to have_received(:create).with(
+        employee: employee,
+        error_message: "not_authed",
+        scheduled_message: scheduled_message,
+        sent_on: Date.today,
+        sent_at: Time.parse("10:00:00 UTC"),
+        message_body: scheduled_message.body,
+      )
 
-    MessageSender.new(employee, scheduled_message).run
-
-    expect(SentScheduledMessage).to have_received(:create).with(
-      employee: employee,
-      error_message: "not_authed",
-      scheduled_message: scheduled_message,
-      sent_on: Date.today,
-      sent_at: Time.parse("10:00:00 UTC"),
-      message_body: scheduled_message.body,
-    )
-
-    Timecop.return
+      Timecop.return
+    end
   end
 
-  it "does not error if channel not found for slack user" do
-    Timecop.freeze(Time.parse("10:00:00 UTC"))
+  context 'if channel id not found for slack user' do
+    let!(:slack_channel_id_double) { double(run: nil) }
+    before do
+      allow(Slack::Web::Client).to receive(:new).and_return(client_double)
+      allow(SlackChannelIdFinder).
+        to receive(:new).with(employee.slack_username, client_double).
+        and_return(slack_channel_id_double)
+      allow(SentScheduledMessage).to receive(:create)
+    end
 
-    scheduled_message = create(:scheduled_message)
-    employee = create(:employee)
-    client_double = Slack::Web::Client.new
-    slack_channel_id_double = double(run: nil)
+    it "does not error " do
+      MessageSender.new(employee, scheduled_message).run
 
-    allow(Slack::Web::Client).to receive(:new).and_return(client_double)
-    allow(SlackChannelIdFinder).
-      to receive(:new).with(employee.slack_username, client_double).
-      and_return(slack_channel_id_double)
-    allow(SentScheduledMessage).to receive(:create)
+      expect(SentScheduledMessage).not_to have_received(:create)
 
-    MessageSender.new(employee, scheduled_message).run
+      Timecop.return
+    end
 
-    expect(SentScheduledMessage).not_to have_received(:create)
+    it 'persists nil to the employee\'s slack_channel_id' do
+      MessageSender.new(employee, scheduled_message).run
+      expect(employee.reload.slack_channel_id).to be_nil
 
-    Timecop.return
+      Timecop.return
+    end
   end
 end
